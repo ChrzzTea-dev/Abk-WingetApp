@@ -1,21 +1,16 @@
-//! Update-Prüfung: Fragt höchstens einmal pro Tag (beim Programmstart) bei
-//! GitHub nach der neuesten Version. Nur wenn es eine neuere Version gibt,
+//! Update-Prüfung: Fragt bei jedem Programmstart bei GitHub nach der
+//! neuesten Version. Nur wenn es eine neuere Version gibt,
 //! meldet sie sich - sonst bleibt alles still (auch bei Fehlern/ohne Internet).
 //!
 //! Die Abfrage läuft über `curl` (ist in Windows 10/11 enthalten), damit keine
 //! zusätzliche Bibliothek nötig ist.
 
-use crate::protocol::app_data_dir;
 use serde::Deserialize;
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 /// GitHub-Repository im Format "benutzer/repository", z. B. "max/abk-wingetapp".
 /// Solange hier nichts steht, wird nie nach Updates gesucht.
 pub const GITHUB_REPO: &str = "ChrzzTea-dev/Abk-WingetApp";
-
-/// Mindestabstand zwischen zwei Prüfungen.
-const CHECK_INTERVAL_SECS: u64 = 24 * 60 * 60;
 
 /// Eine verfügbare neuere Version.
 #[derive(Clone, Debug, PartialEq)]
@@ -65,37 +60,6 @@ fn is_newer(remote: &str, local: &str) -> bool {
     r.resize(len, 0);
     l.resize(len, 0);
     r > l
-}
-
-fn stamp_path() -> Option<PathBuf> {
-    app_data_dir().map(|d| d.join("letzte-update-pruefung.txt"))
-}
-
-fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
-/// Ist seit der letzten erfolgreichen Prüfung ein Tag vergangen?
-fn check_due() -> bool {
-    let last = stamp_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|t| t.trim().parse::<u64>().ok());
-    match last {
-        Some(t) => now_secs().saturating_sub(t) >= CHECK_INTERVAL_SECS,
-        None => true,
-    }
-}
-
-fn mark_checked() {
-    if let Some(path) = stamp_path() {
-        if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        let _ = std::fs::write(path, now_secs().to_string());
-    }
 }
 
 /// Liest die neueste Release von GitHub.
@@ -148,15 +112,14 @@ fn parse_release(json: &str) -> Result<UpdateInfo, String> {
     })
 }
 
-/// Prüft (höchstens einmal pro Tag), ob es eine neuere Version gibt.
+/// Prüft (bei jedem Aufruf), ob es eine neuere Version gibt.
 /// Blockiert kurz - in einem Hintergrund-Thread aufrufen. Gibt nur dann
 /// `Some` zurück, wenn wirklich eine neuere Version vorliegt.
 pub fn check_if_due(current_version: &str) -> Option<UpdateInfo> {
-    if GITHUB_REPO.is_empty() || !check_due() {
+    if GITHUB_REPO.is_empty() {
         return None;
     }
     let latest = fetch_latest(GITHUB_REPO).ok()?;
-    mark_checked(); // nur nach erfolgreicher Abfrage - ohne Internet wird beim nächsten Start neu versucht
     is_newer(&latest.version, current_version).then_some(latest)
 }
 
